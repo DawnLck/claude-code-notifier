@@ -33,18 +33,21 @@ if [[ -n "$SESSION_ID" ]]; then
   TRANSCRIPT=$(find ~/.claude/projects -name "${SESSION_ID}.jsonl" 2>/dev/null | head -1)
   if [[ -n "$TRANSCRIPT" && -f "$TRANSCRIPT" ]]; then
 
-    # 2a. Session duration (first → last timestamp in the JSONL)
-    _first_ts=$(jq -r '.timestamp // empty' "$TRANSCRIPT" 2>/dev/null | head -1 || true)
-    _last_ts=$(jq -r '.timestamp // empty'  "$TRANSCRIPT" 2>/dev/null | tail -1 || true)
-    if [[ -n "$_first_ts" && -n "$_last_ts" ]]; then
-      _s=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${_first_ts%%.*}" "+%s" 2>/dev/null || echo 0)
-      _e=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${_last_ts%%.*}"  "+%s" 2>/dev/null || echo 0)
+    # 2a. Task duration: last user message → last assistant message
+    #     (avoids inflating duration across the whole multi-hour session file)
+    _user_ts=$(jq -r 'select(.type == "user") | .timestamp // empty' \
+               "$TRANSCRIPT" 2>/dev/null | tail -1 || true)
+    _asst_ts=$(jq -r 'select(.type == "assistant") | .timestamp // empty' \
+               "$TRANSCRIPT" 2>/dev/null | tail -1 || true)
+    if [[ -n "$_user_ts" && -n "$_asst_ts" ]]; then
+      _s=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${_user_ts%%.*}" "+%s" 2>/dev/null || echo 0)
+      _e=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${_asst_ts%%.*}" "+%s" 2>/dev/null || echo 0)
       _elapsed=$(( _e - _s ))
       if   [[ $_elapsed -ge 60 ]]; then DURATION="$(( _elapsed/60 ))m $(( _elapsed%60 ))s"
       elif [[ $_elapsed -gt  0 ]]; then DURATION="${_elapsed}s"
       fi
     fi
-    unset _first_ts _last_ts _s _e _elapsed
+    unset _user_ts _asst_ts _s _e _elapsed
 
     # 2b. Project name — decode the sanitized directory name
     #   e.g. "-Users-echo-…--PromptMiner-prompt-miner" → "prompt-miner"
@@ -70,7 +73,7 @@ if [[ -n "$SESSION_ID" ]]; then
         | sed "s/\`\`\`[^\`]*\`\`\`//g; s/\`[^\`]*\`//g" \
         | sed 's/\*\*\([^*]*\)\*\*/\1/g; s/\*//g; s/^#\+[[:space:]]*//')
       _sentence=$(printf '%s' "$_cleaned" | sed 's/\([.?!。？！]\).*/\1/')
-      if [[ "$_sentence" != "$_cleaned" && ${#_sentence} -ge 5 ]]; then
+      if [[ "$_sentence" != "$_cleaned" && ${#_sentence} -ge 20 ]]; then
         SUMMARY=$(printf '%s' "$_sentence" | cut -c1-100)
       else
         SUMMARY=$(printf '%s' "$_cleaned"  | cut -c1-100)
