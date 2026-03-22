@@ -26,7 +26,7 @@ if [[ -n "$SESSION_ID" ]]; then
                  if type == "array" then .[0].text // ""
                  else . // ""
                  end' "$TRANSCRIPT" 2>/dev/null \
-          | grep -v '^$' | head -1 || true)
+          | grep -v '^$' | tail -1 || true)
     # Collapse whitespace and truncate to 60 chars
     TASK_NAME=$(printf '%s' "$RAW" \
       | tr '\n\r\t' ' ' \
@@ -107,7 +107,14 @@ esac
 
 # ─── 4. Build notification strings ───────────────────────────────────────────
 
-if [[ "${LANG:-}${LC_ALL:-}" == *zh* ]]; then
+# Language: NOTIFY_DONE_LANG env var overrides auto-detection (set "zh" or "en")
+# Configure in ~/.claude/settings.json under "env": { "NOTIFY_DONE_LANG": "zh" }
+_lang_src="${NOTIFY_DONE_LANG:-}"
+if [[ -z "$_lang_src" ]]; then
+  [[ "${LANG:-}${LC_ALL:-}" == *zh* ]] && _lang_src="zh" || _lang_src="en"
+fi
+
+if [[ "$_lang_src" == "zh" ]]; then
   TITLE="✅ Claude Code 已完成"
   MSG="${TASK_NAME:-任务已完成}"
   SUB="点击返回 $APP_NAME"
@@ -116,6 +123,7 @@ else
   MSG="${TASK_NAME:-Task completed}"
   SUB="Click to return to $APP_NAME"
 fi
+unset _lang_src
 
 # ─── 5. Send notification ─────────────────────────────────────────────────────
 

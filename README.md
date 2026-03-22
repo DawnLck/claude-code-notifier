@@ -131,6 +131,20 @@ Stop hook fires → notify-done.sh receives JSON on stdin
 
 ## Customization
 
+### Set notification language
+
+By default the script auto-detects your language from `$LANG` / `$LC_ALL`. To override, set `NOTIFY_DONE_LANG` in `~/.claude/settings.json`:
+
+```json
+{
+  "env": {
+    "NOTIFY_DONE_LANG": "zh"
+  }
+}
+```
+
+Accepted values: `zh` (Chinese), `en` (English). Any other value falls back to English.
+
 ### Change the sound
 
 Edit `notify-done.sh` and replace `Glass` with any macOS system sound:
