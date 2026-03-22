@@ -10,7 +10,6 @@ A macOS notification hook for [Claude Code](https://claude.ai/code) that fires w
 - Clicking the notification activates the exact terminal or editor window where Claude is running
 - Supports **English** and **Chinese** (auto-detected or manually configured)
 - Plays the macOS **Glass** sound on completion
-- Optional **cross-device push** via [ntfy.sh](https://ntfy.sh) (phone alerts)
 - Optional **focus-aware** mode — suppress notification if you're already looking at the terminal
 - Works with Terminal, iTerm2, Warp, VS Code, Cursor, Hyper, Alacritty, kitty, Ghostty
 
@@ -116,15 +115,13 @@ Stop hook fires → notify-done.sh receives JSON on stdin
 4. Detect terminal app:
    TERM_PROGRAM env var → process tree walk → osascript fallback
         ↓
-5. Focus check (if NOTIFY_DONE_ONLY_WHEN_AWAY=1):
+5. Focus check (if NOTIFY_DONE_ONLY_WHEN_AWAY=true):
    Skip notification if the terminal is already frontmost
         ↓
 6. Detect language from NOTIFY_DONE_LANG / $LANG / $LC_ALL
         ↓
 7. Fire notification via terminal-notifier
    -activate <bundle-id>  ← makes it clickable to open the right window
-        ↓
-8. Optional: push to ntfy.sh topic for cross-device alert
 ```
 
 ---
@@ -137,8 +134,7 @@ All options are set as environment variables in `~/.claude/settings.json`:
 {
   "env": {
     "NOTIFY_DONE_LANG":           "zh",
-    "NOTIFY_DONE_ONLY_WHEN_AWAY": "true",
-    "NOTIFY_DONE_NTFY_TOPIC":     "my-claude-alerts"
+    "NOTIFY_DONE_ONLY_WHEN_AWAY": "true"
   }
 }
 ```
@@ -147,7 +143,6 @@ All options are set as environment variables in `~/.claude/settings.json`:
 |---|---|---|
 | `NOTIFY_DONE_LANG` | auto | Force language: `zh` or `en`. Auto-detects from `$LANG` if unset. |
 | `NOTIFY_DONE_ONLY_WHEN_AWAY` | `"false"` | Set to `"true"` to suppress the notification when the originating terminal is already the frontmost app. |
-| `NOTIFY_DONE_NTFY_TOPIC` | unset | Your [ntfy.sh](https://ntfy.sh) topic name. When set, also sends a push notification to that topic. |
 
 ---
 
@@ -171,7 +166,6 @@ All options are set as environment variables in `~/.claude/settings.json`:
 - **点击通知激活对应的终端或编辑器窗口**，直接回到 Claude 运行的地方。
 - **支持中英文双语** (自动检测或手动配置)。
 - **播放 macOS 系统音 "Glass"**。
-- **可选：通过 [ntfy.sh](https://ntfy.sh) 进行跨设备推送** (手机端提醒)。
 - **可选：焦点感知模式** — 如果你正在查看终端，则静默通知。
 - **支持多种终端与编辑器**：Terminal, iTerm2, Warp, VS Code, Cursor, Hyper, Alacritty, kitty, Ghostty。
 
@@ -276,7 +270,7 @@ Claude 完成任务
 4. 检测终端应用：
    TERM_PROGRAM 环境变量 → 遍历进程树 → osascript 兜底
         ↓
-5. 焦点检查 (若 NOTIFY_DONE_ONLY_WHEN_AWAY=1):
+5. 焦点检查 (若 NOTIFY_DONE_ONLY_WHEN_AWAY=true):
    如果终端已在前台，则跳过通知
         ↓
 6. 语言检测：
@@ -284,8 +278,6 @@ Claude 完成任务
         ↓
 7. 通过 terminal-notifier 发送通知：
    -activate <bundle-id>  ← 使其可点击并跳转至正确窗口
-        ↓
-8. 可选：推送至 ntfy.sh 话题，实现跨设备提醒
 ```
 
 ---
@@ -298,8 +290,7 @@ Claude 完成任务
 {
   "env": {
     "NOTIFY_DONE_LANG":           "zh",
-    "NOTIFY_DONE_ONLY_WHEN_AWAY": "true",
-    "NOTIFY_DONE_NTFY_TOPIC":     "my-claude-alerts"
+    "NOTIFY_DONE_ONLY_WHEN_AWAY": "true"
   }
 }
 ```
@@ -308,7 +299,6 @@ Claude 完成任务
 |---|---|---|
 | `NOTIFY_DONE_LANG` | auto | 强制指定语言：`zh` 或 `en`。未设置时自动检测 `$LANG`。 |
 | `NOTIFY_DONE_ONLY_WHEN_AWAY` | `"false"` | 设置为 `"true"` 时，如果所在的终端窗口已处于最前，则不发送通知。 |
-| `NOTIFY_DONE_NTFY_TOPIC` | 未设置 | 你的 [ntfy.sh](https://ntfy.sh) 话题名称。设置后会同步发送推送通知。 |
 
 ---
 

@@ -6,7 +6,6 @@
 # • Shows session duration and project name in the subtitle.
 # • Clicking the notification activates the originating terminal/editor.
 # • Supports English and Chinese (auto-detected or configured via env var).
-# • Optionally pushes to cross-device via ntfy.sh.
 #
 # Requirements: macOS, terminal-notifier (brew install terminal-notifier)
 # Install:      See README.md or run install.sh
@@ -15,8 +14,6 @@
 #   NOTIFY_DONE_LANG            "zh" or "en"  (default: auto-detect from $LANG)
 #   NOTIFY_DONE_ONLY_WHEN_AWAY  "true"        (default: "false") — skip notification
 #                                              if the terminal is already focused
-#   NOTIFY_DONE_NTFY_TOPIC      "<topic>"     (default: unset) — push to ntfy.sh
-#                                              topic for cross-device alerts
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
@@ -204,15 +201,3 @@ else
   osascript -e "display notification \"$MSG\" with title \"$TITLE\" subtitle \"$SUB\" sound name \"Glass\""
 fi
 
-# ─── 7. Cross-device push via ntfy.sh (optional) ─────────────────────────────
-# Set NOTIFY_DONE_NTFY_TOPIC to your ntfy topic name to receive push alerts
-# on your phone. Sign up free at https://ntfy.sh — no account needed.
-
-if [[ -n "${NOTIFY_DONE_NTFY_TOPIC:-}" ]]; then
-  curl -s \
-    -H "Title: $TITLE" \
-    -H "Tags: white_check_mark" \
-    -H "Priority: default" \
-    -d "$MSG" \
-    "https://ntfy.sh/${NOTIFY_DONE_NTFY_TOPIC}" &>/dev/null &
-fi
