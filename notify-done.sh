@@ -27,11 +27,19 @@ if [[ -n "$SESSION_ID" ]]; then
                  else . // ""
                  end' "$TRANSCRIPT" 2>/dev/null \
           | grep -v '^$' | tail -1 || true)
-    # Collapse whitespace and truncate to 60 chars
-    TASK_NAME=$(printf '%s' "$RAW" \
+    # Collapse whitespace and strip basic markdown formatting
+    CLEANED=$(printf '%s' "$RAW" \
       | tr '\n\r\t' ' ' \
       | sed 's/[[:space:]]\+/ /g; s/^[[:space:]]*//; s/[[:space:]]*$//' \
-      | cut -c1-60)
+      | sed "s/\`\`\`[^\`]*\`\`\`//g; s/\`[^\`]*\`//g" \
+      | sed 's/\*\*\([^*]*\)\*\*/\1/g; s/\*//g; s/^#\+[[:space:]]*//')
+    # Extract first complete sentence; fall back to 80-char truncation
+    SENTENCE=$(printf '%s' "$CLEANED" | sed 's/\([.?!。？！]\).*/\1/')
+    if [[ "$SENTENCE" != "$CLEANED" && ${#SENTENCE} -ge 5 ]]; then
+      TASK_NAME=$(printf '%s' "$SENTENCE" | cut -c1-80)
+    else
+      TASK_NAME=$(printf '%s' "$CLEANED" | cut -c1-80)
+    fi
   fi
 fi
 
