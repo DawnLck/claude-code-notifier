@@ -41,7 +41,7 @@ A macOS notification hook for [Claude Code](https://claude.ai/code) that fires w
 ### One-command install (recommended)
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/claude-code-done-notifier.git
+git clone https://github.com/DawnLck/claude-code-done-notifier.git
 cd claude-code-done-notifier
 bash install.sh
 ```
