@@ -52,8 +52,12 @@ if [[ -n "$SESSION_ID" ]]; then
     PROJECT=$(printf '%s' "$_pdir" | sed 's/^-//' | awk -F'--+' '{print $NF}')
     unset _pdir
 
-    # 2c. Task summary — first sentence of the last assistant message
-    _raw=$(jq -rs '[.[] | select(.type == "assistant")] | last |
+    # 2c. Task summary — first sentence of the last assistant message that
+    #     contains actual text (skips thinking-only / mid-stream entries)
+    _raw=$(jq -rs '[.[] | select(.type == "assistant") |
+                   select(.message.content | arrays |
+                     map(select(.type == "text")) | length > 0)] |
+                   last |
                    .message.content |
                    if type == "array" then
                      map(select(.type == "text")) | .[0].text // ""
