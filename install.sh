@@ -8,9 +8,9 @@
 set -euo pipefail
 
 HOOK_DIR="$HOME/.claude/hooks"
-HOOK_FILE="$HOOK_DIR/notify-done.sh"
+HOOK_FILE="$HOOK_DIR/claude-code-notify.sh"
 SETTINGS_FILE="$HOME/.claude/settings.json"
-REPO_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/notify-done.sh"
+REPO_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/claude-code-notify.sh"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CLAUDE='\033[38;2;217;119;88m'; NC='\033[0m'
 
@@ -215,7 +215,7 @@ _ask() {
 
 _ask_yn() {
   local prompt="$1" default="$2"
-  local sel_options=("Yes" "No")
+  local sel_options=("${OPT_YES:-Yes}" "${OPT_NO:-No}")
   [[ "$default" == "n" ]] && _SELECT_DEFAULT=1 || _SELECT_DEFAULT=0
   _select "$prompt" "${sel_options[@]}"
   [[ "$REPLY" -eq 1 ]] && REPLY="true" || REPLY="false"
@@ -280,27 +280,46 @@ case "$REPLY" in
   3) CFG_LANG="zh" ;;
   *) CFG_LANG=""   ;; # auto-detect
 esac
+
+# Default English texts
+Q_SUMMARY="Show Claude's reply summary as notification body?"
+Q_DURATION="Show task duration in the subtitle?"
+Q_PROJECT="Show project name in the subtitle?"
+Q_AWAY="Only notify when you're away (suppress if terminal is focused)?"
+OPT_YES="Yes"
+OPT_NO="No"
+
+# Switch to Chinese if selected
+if [[ "$CFG_LANG" == "zh" ]]; then
+  Q_SUMMARY="是否在通知正文中显示 Claude 的回复摘要？"
+  Q_DURATION="是否在副标题中显示任务耗时？"
+  Q_PROJECT="是否在副标题中显示项目名称？"
+  Q_AWAY="仅在离开时通知（如果当前终端窗口已获得焦点则静默）？"
+  OPT_YES="是 (Yes)"
+  OPT_NO="否 (No)"
+fi
+
 [[ -n "$CFG_LANG" ]] && success "Language → $CFG_LANG" || success "Language → auto-detect"
 
 # 4b. Show task summary
-_ask_yn "Show Claude's reply summary as notification body?" "y"
+_ask_yn "$Q_SUMMARY" "y"
 CFG_SUMMARY="$REPLY"
-success "Show summary → $CFG_SUMMARY"
+success "$([[ "$CFG_LANG" == "zh" ]] && echo '显示摘要' || echo 'Show summary') → $CFG_SUMMARY"
 
 # 4c. Show task duration
-_ask_yn "Show task duration in the subtitle?" "y"
+_ask_yn "$Q_DURATION" "y"
 CFG_DURATION="$REPLY"
-success "Show duration → $CFG_DURATION"
+success "$([[ "$CFG_LANG" == "zh" ]] && echo '显示耗时' || echo 'Show duration') → $CFG_DURATION"
 
 # 4d. Show project name
-_ask_yn "Show project name in the subtitle?" "y"
+_ask_yn "$Q_PROJECT" "y"
 CFG_PROJECT="$REPLY"
-success "Show project → $CFG_PROJECT"
+success "$([[ "$CFG_LANG" == "zh" ]] && echo '显示项目' || echo 'Show project') → $CFG_PROJECT"
 
 # 4e. Focus-aware mode
-_ask_yn "Only notify when you're away (suppress if terminal is focused)?" "n"
+_ask_yn "$Q_AWAY" "n"
 CFG_AWAY="$REPLY"
-success "Focus-aware → $CFG_AWAY"
+success "$([[ "$CFG_LANG" == "zh" ]] && echo '焦点感知' || echo 'Focus-aware') → $CFG_AWAY"
 
 # Write env config to settings.json
 printf "\n"

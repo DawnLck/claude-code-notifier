@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# notify-done.sh — Claude Code "Stop" hook
+# claude-code-notify.sh — Claude Code "Stop" hook
 #
 # Sends a native desktop notification when Claude finishes a task.
 # • Shows first sentence of Claude's last reply as the task summary.
@@ -48,6 +48,27 @@ _to_epoch() {
   esac
 }
 
+_play_sound() {
+  local file="$1"
+  [[ -z "$file" || ! -f "$file" ]] && return
+
+  case "$OS" in
+    Darwin) afplay "$file" & ;;
+    Linux)
+      if [[ "$IS_WSL" == true ]] && command -v powershell.exe &>/dev/null; then
+        local win_path="$file"
+        command -v wslpath &>/dev/null && win_path=$(wslpath -w "$file")
+        powershell.exe -NoProfile -NonInteractive -Command "(New-Object Media.SoundPlayer '$win_path').Play()" &
+      else
+        if   command -v paplay  &>/dev/null; then paplay  "$file" &
+        elif command -v pw-play &>/dev/null; then pw-play "$file" &
+        elif command -v aplay   &>/dev/null; then aplay   "$file" &
+        fi
+      fi
+      ;;
+  esac
+}
+
 # ─── 3. Extract info from transcript ─────────────────────────────────────────
 
 SUMMARY=""
@@ -56,6 +77,9 @@ DURATION=""
 PROJECT=""
 
 if [[ -n "$SESSION_ID" ]]; then
+  # Give the FS a moment to flush the transcript (prevents stale message bug)
+  sleep 0.5
+
   TRANSCRIPT=$(find ~/.claude/projects -name "${SESSION_ID}.jsonl" 2>/dev/null | head -1)
   if [[ -n "$TRANSCRIPT" && -f "$TRANSCRIPT" ]]; then
 
@@ -300,6 +324,10 @@ for _p in "${_sub_parts[@]}"; do
   [[ -n "$SUB" ]] && SUB="$SUB · $_p" || SUB="$_p"
 done
 unset _lang _sub_parts _p
+
+_sound_file="${NOTIFY_DONE_SOUND_FILE:-}"
+[[ -z "$_sound_file" ]] && _sound_file=$(printf '%s' "$INPUT" | jq -r '.env.NOTIFY_DONE_SOUND_FILE // ""' 2>/dev/null || true)
+_play_sound "$_sound_file"
 
 # ─── 7. Send notification (platform-dispatched) ──────────────────────────────
 

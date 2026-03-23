@@ -70,8 +70,8 @@ Then **restart Claude Code** or open `/hooks` to activate.
 2. Copy the hook script:
    ```bash
    mkdir -p ~/.claude/hooks
-   cp notify-done.sh ~/.claude/hooks/notify-done.sh
-   chmod +x ~/.claude/hooks/notify-done.sh
+   cp claude-code-notify.sh ~/.claude/hooks/claude-code-notify.sh
+   chmod +x ~/.claude/hooks/claude-code-notify.sh
    ```
 
 3. Register the hook in `~/.claude/settings.json`:
@@ -83,7 +83,7 @@ Then **restart Claude Code** or open `/hooks` to activate.
            "hooks": [
              {
                "type": "command",
-               "command": "bash ~/.claude/hooks/notify-done.sh",
+               "command": "bash ~/.claude/hooks/claude-code-notify.sh",
                "async": true
              }
            ]
@@ -110,7 +110,7 @@ bash install.sh --uninstall
 ```
 Claude finishes a task
         ↓
-Stop hook fires → notify-done.sh receives JSON on stdin
+Stop hook fires → claude-code-notify.sh receives JSON on stdin
         ↓
 1. Extract session_id from stdin JSON
 2. Find transcript: ~/.claude/projects/**/<session_id>.jsonl
@@ -156,6 +156,7 @@ All options are set as environment variables in `~/.claude/settings.json`:
 | `NOTIFY_DONE_SHOW_DURATION` | `"true"` | Show task duration in the subtitle. |
 | `NOTIFY_DONE_SHOW_PROJECT` | `"true"` | Show project name in the subtitle. |
 | `NOTIFY_DONE_ONLY_WHEN_AWAY` | `"false"` | Suppress the notification when the originating terminal is already the frontmost app. |
+| `NOTIFY_DONE_SOUND_FILE` | | Absolute path to a .mp3/.wav for custom notification sound. See [Sound Library](sounds/README.md). |
 
 ---
 
@@ -336,6 +337,7 @@ Claude 完成任务
 | `NOTIFY_DONE_SHOW_DURATION` | `"true"` | 是否在副标题中显示任务耗时。 |
 | `NOTIFY_DONE_SHOW_PROJECT` | `"true"` | 是否在副标题中显示项目名称。 |
 | `NOTIFY_DONE_ONLY_WHEN_AWAY` | `"false"` | 设置为 `"true"` 时，如果所在的终端窗口已处于最前，则不发送通知。 |
+| `NOTIFY_DONE_SOUND_FILE` | | 自定义通知音效文件（.mp3/.wav 的绝对路径）。详见 [音效库](sounds/README.md)。 |
 
 ---
 
