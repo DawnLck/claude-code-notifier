@@ -17,7 +17,7 @@ Thank you for your interest in contributing! This is a macOS notification hook f
 
 ### Development Setup
 
-No build step required. The project is a single shell script (`notify-done.sh`) and an installer (`install.sh`).
+No build step required. The project is a single shell script (`claude-code-notify.sh`) and an installer (`install.sh`).
 
 ```bash
 git clone https://github.com/DawnLck/claude-code-notifier.git
@@ -33,7 +33,7 @@ brew install jq terminal-notifier
 To test the hook manually, pipe a sample JSON payload:
 
 ```bash
-echo '{"session_id":"test-123"}' | bash notify-done.sh
+echo '{"session_id":"test-123"}' | bash claude-code-notify.sh
 ```
 
 ### Pull Request Guidelines
@@ -41,7 +41,7 @@ echo '{"session_id":"test-123"}' | bash notify-done.sh
 1. **Fork** the repo and create a branch from `main`.
 2. Keep changes focused — one fix or feature per PR.
 3. Test on macOS with at least one supported terminal (Terminal, iTerm2, Warp, VS Code, or Cursor).
-4. If you touch user-facing strings, update both `en` and `zh` variants in `notify-done.sh`.
+4. If you touch user-facing strings, update both `en` and `zh` variants in `claude-code-notify.sh`.
 5. Update `README.md` if your change affects configuration, installation, or behavior.
 6. Open the PR against `main` with a clear title and description.
 
@@ -88,7 +88,7 @@ By contributing you agree that your work will be released under the [MIT License
 
 ### 本地开发
 
-本项目无需构建步骤，核心是一个 Shell 脚本（`notify-done.sh`）和安装脚本（`install.sh`）。
+本项目无需构建步骤，核心是一个 Shell 脚本（`claude-code-notify.sh`）和安装脚本（`install.sh`）。
 
 ```bash
 git clone https://github.com/DawnLck/claude-code-notifier.git
@@ -104,7 +104,7 @@ brew install jq terminal-notifier
 手动测试钩子，传入示例 JSON 载荷：
 
 ```bash
-echo '{"session_id":"test-123"}' | bash notify-done.sh
+echo '{"session_id":"test-123"}' | bash claude-code-notify.sh
 ```
 
 ### Pull Request 规范
@@ -112,7 +112,7 @@ echo '{"session_id":"test-123"}' | bash notify-done.sh
 1. **Fork** 本仓库，从 `main` 分支创建你的功能分支。
 2. 保持变更聚焦 — 每个 PR 只做一件事（修复或功能）。
 3. 在 macOS 上使用至少一种支持的终端（Terminal、iTerm2、Warp、VS Code 或 Cursor）进行测试。
-4. 如涉及用户可见的文字，需同步更新 `notify-done.sh` 中的 `en` 和 `zh` 两套文案。
+4. 如涉及用户可见的文字，需同步更新 `claude-code-notify.sh` 中的 `en` 和 `zh` 两套文案。
 5. 如变更影响配置、安装方式或行为，请一并更新 `README.md`。
 6. PR 请提交至 `main` 分支，标题和描述要清晰明了。
 

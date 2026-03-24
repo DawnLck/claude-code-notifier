@@ -16,12 +16,25 @@
 # Install:      See README.md or run install.sh
 #
 # ── Configuration (set in ~/.claude/settings.json → "env": { … }) ─────────────
-#   NOTIFY_DONE_LANG            "zh" or "en"  (default: auto-detect from $LANG)
-#   NOTIFY_DONE_SHOW_SUMMARY    "true"/"false" (default: "true")  — Claude's reply
-#   NOTIFY_DONE_SHOW_DURATION   "true"/"false" (default: "true")  — task duration
-#   NOTIFY_DONE_SHOW_PROJECT    "true"/"false" (default: "true")  — project name
-#   NOTIFY_DONE_ONLY_WHEN_AWAY  "true"/"false" (default: "false") — skip notification
+#   NOTIFY_LANG            "zh" or "en"  (default: auto-detect from $LANG)
+#   NOTIFY_SHOW_SUMMARY    "true"/"false" (default: "true")  — Claude's reply
+#   NOTIFY_SHOW_DURATION   "true"/"false" (default: "true")  — task duration
+#   NOTIFY_SHOW_PROJECT    "true"/"false" (default: "true")  — project name
+#   NOTIFY_ONLY_WHEN_AWAY  "true"/"false" (default: "false") — skip notification
 #                                              if the terminal is already focused
+#
+#   FEISHU_WEBHOOK (recommended - simple & flexible):
+#   NOTIFY_FEISHU_WEBHOOK_URL      Lark/Feishu webhook URL
+#   NOTIFY_FEISHU_WEBHOOK_SECRET   Optional sign secret for webhook
+#
+#   LLM summarization (optional — distills DETAILS into one sentence via API):
+#   NOTIFY_LLM_ENDPOINT    API endpoint  (e.g. https://api.anthropic.com/v1/messages
+#                                              or    https://api.moonshot.cn/v1/chat/completions)
+#   NOTIFY_LLM_API_KEY     API key
+#   NOTIFY_LLM_MODEL       Model ID      (default: claude-haiku-4-5-20251001)
+#   NOTIFY_LLM_API_FORMAT  "anthropic" or "openai"  (default: anthropic)
+#                               Use "openai" for OpenAI-compatible providers (Moonshot, DeepSeek,
+#                               OpenAI, etc.) — switches auth header and response parsing.
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
@@ -35,7 +48,16 @@ IS_WSL=false
 # ─── 1. Read hook input (session_id lives here) ───────────────────────────────
 
 INPUT=$(cat)
+
+# Extract config from the JSON payload's .env field (provided by Claude Code)
+# We prioritize these over existing shell environment variables.
+eval "$(printf '%s' "$INPUT" | jq -r '.env | to_entries[] | "export \(.key)=\(.value | @sh)"' 2>/dev/null || true)"
+
 SESSION_ID=$(printf '%s' "$INPUT" | jq -r '.session_id // ""' 2>/dev/null || true)
+HOOK_EVENT=$(printf '%s' "$INPUT" | jq -r '.hook_event_name // "Stop"' 2>/dev/null || true)
+NOTIFICATION_TYPE=$(printf '%s' "$INPUT" | jq -r '.notification_type // ""' 2>/dev/null || true)
+NOTIFICATION_MSG=$(printf '%s' "$INPUT" | jq -r '.message // ""' 2>/dev/null || true)
+HOOK_CWD=$(printf '%s' "$INPUT" | jq -r '.cwd // ""' 2>/dev/null || true)
 
 # ─── 2. Platform-aware helpers ────────────────────────────────────────────────
 
@@ -65,18 +87,122 @@ _play_sound() {
         elif command -v aplay   &>/dev/null; then aplay   "$file" &
         fi
       fi
-      ;;
   esac
 }
 
-# ─── 3. Extract info from transcript ─────────────────────────────────────────
+_send_feishu_webhook() {
+  local webhook_url="${NOTIFY_FEISHU_WEBHOOK_URL:-}"
+  local webhook_secret="${NOTIFY_FEISHU_WEBHOOK_SECRET:-}"
+
+  [[ -z "$webhook_url" ]] && return
+  command -v curl &>/dev/null || return
+
+  local msg_text
+  msg_text=$(printf "%s\n\n%s\n%s" "$TITLE" "$MSG" "$SUB")
+
+  local payload
+  if [[ -n "$webhook_secret" ]] && command -v python3 &>/dev/null; then
+    # Feishu Webhook with Sign/Secret requires python (or node) for HMAC-SHA256
+    local timestamp=$(date +%s)
+    local sign
+    sign=$(python3 -c "import hashlib, base64, hmac; secret_bits = bytes('$webhook_secret', 'utf-8'); string_to_sign = '{}\n{}'.format($timestamp, '$webhook_secret'); hmac_code = hmac.new(secret_bits, string_to_sign.encode('utf-8'), digestmod=hashlib.sha256).digest(); print(base64.b64encode(hmac_code).decode('utf-8'))")
+    payload=$(jq -n --arg timestamp "$timestamp" --arg sign "$sign" --arg text "$msg_text" \
+      '{timestamp: $timestamp, sign: $sign, msg_type: "text", content: {text: $text}}')
+  else
+    payload=$(jq -n --arg text "$msg_text" '{msg_type: "text", content: {text: $text}}')
+  fi
+
+  curl -s -X POST "$webhook_url" \
+    -H "Content-Type: application/json" \
+    -d "$payload" > /dev/null &
+}
+
+# ─── 3. LLM summarization helper ─────────────────────────────────────────────
+# Calls any LLM API and returns a single-sentence summary.
+# Supports "anthropic" format (default) and "openai" format (Moonshot, DeepSeek, OpenAI, etc.).
+# Prints the sentence to stdout; returns non-zero on failure (caller falls back).
+_summarize_with_llm() {
+  local text="$1"
+  local endpoint="${NOTIFY_LLM_ENDPOINT:-}"
+  local api_key="${NOTIFY_LLM_API_KEY:-}"
+  local model="${NOTIFY_LLM_MODEL:-claude-haiku-4-5-20251001}"
+  local fmt="${NOTIFY_LLM_API_FORMAT:-anthropic}"
+  local max_tokens="${NOTIFY_LLM_MAX_TOKENS:-1024}"
+  local extra_body="${NOTIFY_LLM_EXTRA_BODY:-{}}"
+
+  # For debugging — only active if NOTIFY_DEBUG is true
+  local _log="/tmp/claude-notify-llm.log"
+
+  # Language-aware prompt: detect zh from env var or system locale
+  local _lang="${NOTIFY_LANG:-}"
+  [[ -z "$_lang" ]] && [[ "${LANG:-}${LC_ALL:-}" == *zh* ]] && _lang="zh"
+  local prompt
+  if [[ "$_lang" == "zh" ]]; then
+    prompt="用一句话（不超过50字）概括以下 AI 助手的回复内容，只输出这句话，不加引号或额外解释："
+  else
+    prompt="Summarize the following AI assistant response in one concise sentence (max 150 characters). Output only the sentence, no quotes or extra explanation:"
+  fi
+
+  [[ -z "$endpoint" || -z "$api_key" || -z "$text" ]] && return 1
+  command -v curl &>/dev/null || return 1
+
+  local payload response result
+
+  if [[ "$fmt" == "openai" ]]; then
+    payload=$(jq -n \
+      --arg model  "$model" \
+      --arg sys    "$prompt" \
+      --arg user   "$text" \
+      --arg max    "$max_tokens" \
+      --argjson extra "$extra_body" \
+      '{model: $model, max_tokens: ($max | tonumber), thinking: {"type": "disabled"}, messages: [{role: "system", content: $sys}, {role: "user", content: $user}]} * $extra')
+
+    response=$(curl -sf --max-time 15 \
+      -X POST "$endpoint" \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer $api_key" \
+      -d "$payload" 2>>"$_log") || {
+        [[ "${NOTIFY_DEBUG:-}" == "true" ]] && echo "[$(date)] OpenAI curl failed: $?" >> "$_log"
+        return 1
+      }
+
+    result=$(printf '%s' "$response" | jq -r '.choices[0].message.content // empty' 2>/dev/null)
+  else
+    payload=$(jq -n \
+      --arg model  "$model" \
+      --arg user   "$prompt\n\n$text" \
+      --arg max    "$max_tokens" \
+      --argjson extra "$extra_body" \
+      '{model: $model, max_tokens: ($max | tonumber), messages: [{role: "user", content: $user}]} * $extra')
+
+    response=$(curl -sf --max-time 15 \
+      -X POST "$endpoint" \
+      -H "Content-Type: application/json" \
+      -H "x-api-key: $api_key" \
+      -H "anthropic-version: 2023-06-01" \
+      -d "$payload" 2>>"$_log") || {
+        [[ "${NOTIFY_DEBUG:-}" == "true" ]] && echo "[$(date)] Anthropic curl failed: $?" >> "$_log"
+        return 1
+      }
+
+    result=$(printf '%s' "$response" | jq -r '.content[0].text // empty' 2>/dev/null)
+  fi
+
+  [[ -z "$result" ]] && {
+    [[ "${NOTIFY_DEBUG:-}" == "true" ]] && echo "[$(date)] LLM parsing failed or empty result. Response: $response" >> "$_log"
+    return 1
+  }
+  printf '%s' "$result"
+}
+
+# ─── 4. Extract info from transcript ─────────────────────────────────────────
 
 SUMMARY=""
 DETAILS=""
 DURATION=""
 PROJECT=""
 
-if [[ -n "$SESSION_ID" ]]; then
+if [[ "$HOOK_EVENT" != "Notification" && -n "$SESSION_ID" ]]; then
   # Give the FS a moment to flush the transcript (prevents stale message bug)
   sleep 0.5
 
@@ -117,29 +243,45 @@ if [[ -n "$SESSION_ID" ]]; then
     SUMMARY=""
     DETAILS=""
     if [[ -n "$_raw" ]]; then
-      # Extract summary (first sentence)
-      _cleaned_for_sum=$(printf '%s' "$_raw" | tr '\n\r\t' ' ' | sed 's/[[:space:]]\+/ /g; s/^[[:space:]]*//; s/[[:space:]]*$//' | sed "s/\`\`\`[^\`]*\`\`\`//g; s/\`[^\`]*\`//g" | sed 's/\*\*\([^*]*\)\*\*/\1/g' | sed 's/^#\+[[:space:]]*//')
-      _sentence=$(printf '%s' "$_cleaned_for_sum" | sed 's/\([.?!。？！]\).*/\1/')
-      if [[ "$_sentence" != "$_cleaned_for_sum" && ${#_sentence} -ge 20 ]]; then
-        SUMMARY=$(printf '%s' "$_sentence" | cut -c1-100)
-      else
-        SUMMARY=$(printf '%s' "$_cleaned_for_sum" | cut -c1-100)
+      # Extract details: LLM summarization (if configured) or raw text fallback
+      if [[ -n "${NOTIFY_LLM_ENDPOINT:-}" && -n "${NOTIFY_LLM_API_KEY:-}" ]]; then
+        _llm_result=$(_summarize_with_llm "$_raw" || true)
+        if [[ -n "$_llm_result" ]]; then
+          # LLM succeeded: use its output as the sole summary, drop verbose DETAILS
+          SUMMARY="$_llm_result"
+          DETAILS=""
+        fi
       fi
-      unset _cleaned_for_sum _sentence
+      if [[ -z "$SUMMARY" ]]; then
+        # LLM not configured or failed: fall back to first-sentence extraction
+        _cleaned_for_sum=$(printf '%s' "$_raw" | tr '\n\r\t' ' ' | sed 's/[[:space:]]\+/ /g; s/^[[:space:]]*//; s/[[:space:]]*$//' | sed "s/\`\`\`[^\`]*\`\`\`//g; s/\`[^\`]*\`//g" | sed 's/\*\*\([^*]*\)\*\*/\1/g' | sed 's/^#\+[[:space:]]*//')
+        _sentence=$(printf '%s' "$_cleaned_for_sum" | sed 's/\([.?!。？！]\).*/\1/')
+        if [[ "$_sentence" != "$_cleaned_for_sum" && ${#_sentence} -ge 20 ]]; then
+          SUMMARY=$(printf '%s' "$_sentence" | cut -c1-100)
+        else
+          SUMMARY=$(printf '%s' "$_cleaned_for_sum" | cut -c1-100)
+        fi
+        unset _cleaned_for_sum _sentence
 
-      # Extract details (remaining text, cleaned up)
-      _remaint=$(printf '%s' "$_raw" | sed "s/^\s*//" | sed "s/^${SUMMARY//\//\\/}//" | sed "s/^\s*//" || echo "")
-      DETAILS=$(printf '%s' "$_remaint" \
-        | sed "s/\`\`\`[^\`]*\`\`\`//g; s/\`[^\`]*\`//g" \
-        | sed 's/^[[:space:]]*[*-][[:space:]]/• /g' \
-        | head -c 800)
-      unset _remaint
+        _remaint=$(printf '%s' "$_raw" | sed "s/^\s*//" | sed "s/^${SUMMARY//\//\\/}//" | sed "s/^\s*//" || echo "")
+        DETAILS=$(printf '%s' "$_remaint" \
+          | sed "s/\`\`\`[^\`]*\`\`\`//g; s/\`[^\`]*\`//g" \
+          | sed 's/^[[:space:]]*[*-][[:space:]]/• /g' \
+          | head -c 800)
+        unset _remaint
+      fi
+      unset _llm_result
     fi
     unset _raw
   fi
 fi
 
-# ─── 4. Detect which terminal/editor opened this session ──────────────────────
+# For Notification events: derive project from cwd
+if [[ "$HOOK_EVENT" == "Notification" && -n "$HOOK_CWD" ]]; then
+  PROJECT=$(basename "$HOOK_CWD")
+fi
+
+# ─── 5. Detect which terminal/editor opened this session ──────────────────────
 
 # For macOS: returns Bundle ID;  For Linux/WSL: returns terminal name string
 TERMINAL_ID=""
@@ -242,11 +384,11 @@ case "$OS" in
   *)      _detect_terminal_linux ;;
 esac
 
-# ─── 5. Focus check (opt-in) ──────────────────────────────────────────────────
-# Set NOTIFY_DONE_ONLY_WHEN_AWAY=true to suppress the notification when the
+# ─── 6. Focus check (opt-in) ──────────────────────────────────────────────────
+# Set NOTIFY_ONLY_WHEN_AWAY=true to suppress the notification when the
 # originating terminal/editor is already the frontmost app.
 
-if [[ "${NOTIFY_DONE_ONLY_WHEN_AWAY:-false}" == "true" ]]; then
+if [[ "${NOTIFY_ONLY_WHEN_AWAY:-false}" == "true" ]]; then
   _is_focused=false
 
   case "$OS" in
@@ -286,20 +428,39 @@ if [[ "${NOTIFY_DONE_ONLY_WHEN_AWAY:-false}" == "true" ]]; then
   unset _is_focused
 fi
 
-# ─── 6. Build notification strings ───────────────────────────────────────────
+# ─── 7. Build notification strings ───────────────────────────────────────────
 
-# Language: NOTIFY_DONE_LANG overrides auto-detection ("zh" or "en")
-_lang="${NOTIFY_DONE_LANG:-}"
+# Language: NOTIFY_LANG overrides auto-detection ("zh" or "en")
+_lang="${NOTIFY_LANG:-}"
 if [[ -z "$_lang" ]]; then
   [[ "${LANG:-}${LC_ALL:-}" == *zh* ]] && _lang="zh" || _lang="en"
 fi
 
 # Subtitle: project · duration · click to return
 _sub_parts=()
-[[ "${NOTIFY_DONE_SHOW_PROJECT:-true}"  == "true" && -n "$PROJECT"  ]] && _sub_parts+=("$PROJECT")
-[[ "${NOTIFY_DONE_SHOW_DURATION:-true}" == "true" && -n "$DURATION" ]] && _sub_parts+=("$DURATION")
+[[ "${NOTIFY_SHOW_PROJECT:-true}"  == "true" && -n "$PROJECT"  ]] && _sub_parts+=("$PROJECT")
+[[ "${NOTIFY_SHOW_DURATION:-true}" == "true" && -n "$DURATION" ]] && _sub_parts+=("$DURATION")
 
-if [[ "$_lang" == "zh" ]]; then
+if [[ "$HOOK_EVENT" == "Notification" ]]; then
+  # Notification event: use payload message and type-specific title
+  if [[ "$_lang" == "zh" ]]; then
+    case "$NOTIFICATION_TYPE" in
+      idle_prompt)      TITLE="💬 Claude Code 正在等待你的输入" ;;
+      permission_prompt) TITLE="🔐 Claude Code 需要你的授权" ;;
+      *)                TITLE="🔔 Claude Code 通知" ;;
+    esac
+    MSG="${NOTIFICATION_MSG:-Claude Code 需要你的回应}"
+    _sub_parts+=("$TERMINAL_APP")
+  else
+    case "$NOTIFICATION_TYPE" in
+      idle_prompt)      TITLE="💬 Claude Code — Input Required" ;;
+      permission_prompt) TITLE="🔐 Claude Code — Permission Required" ;;
+      *)                TITLE="🔔 Claude Code — Notification" ;;
+    esac
+    MSG="${NOTIFICATION_MSG:-Claude Code needs your attention}"
+    _sub_parts+=("$TERMINAL_APP")
+  fi
+elif [[ "$_lang" == "zh" ]]; then
   TITLE="✅ Claude Code 已完成任务"
   _body="${SUMMARY:-任务已完成}"
   [[ -n "$DETAILS" ]] && MSG="$_body"$'\n\n'"$DETAILS" || MSG="$_body"
@@ -325,11 +486,10 @@ for _p in "${_sub_parts[@]}"; do
 done
 unset _lang _sub_parts _p
 
-_sound_file="${NOTIFY_DONE_SOUND_FILE:-}"
-[[ -z "$_sound_file" ]] && _sound_file=$(printf '%s' "$INPUT" | jq -r '.env.NOTIFY_DONE_SOUND_FILE // ""' 2>/dev/null || true)
+_sound_file="${NOTIFY_SOUND_FILE:-}"
 _play_sound "$_sound_file"
 
-# ─── 7. Send notification (platform-dispatched) ──────────────────────────────
+# ─── 8. Send notification (platform-dispatched) ──────────────────────────────
 
 _send_macos() {
   local notifier
@@ -416,3 +576,6 @@ case "$OS" in
     # Unknown OS — silent fallback
     ;;
 esac
+
+# ─── 9. Extra Channels (Feishu/Lark etc.) ───────────────────────────────────
+_send_feishu_webhook

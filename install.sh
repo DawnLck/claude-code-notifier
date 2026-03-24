@@ -37,6 +37,12 @@ if [[ "${1:-}" == "--uninstall" ]]; then
         "$SETTINGS_FILE" > "$TMP" && mv "$TMP" "$SETTINGS_FILE"
       success "Removed Stop hook from $SETTINGS_FILE"
     fi
+    if jq -e '.hooks.Notification' "$SETTINGS_FILE" &>/dev/null; then
+      TMP=$(mktemp)
+      jq 'del(.hooks.Notification) | if .hooks == {} then del(.hooks) else . end' \
+        "$SETTINGS_FILE" > "$TMP" && mv "$TMP" "$SETTINGS_FILE"
+      success "Removed Notification hook from $SETTINGS_FILE"
+    fi
   fi
 
   printf "\n${GREEN}Done. The notification hook has been removed.${NC}\n\n"
@@ -183,7 +189,7 @@ fi
 if jq -e '.hooks.Stop' "$SETTINGS_FILE" &>/dev/null; then
   # Check if our specific hook is already there
   if jq -e --arg cmd "bash $HOOK_FILE" '.hooks.Stop[]?.hooks[]? | select(.command == $cmd)' "$SETTINGS_FILE" &>/dev/null; then
-    success "Hook already registered in $SETTINGS_FILE — skipping"
+    success "Stop hook already registered in $SETTINGS_FILE — skipping"
   else
     warn "A Stop hook already exists in $SETTINGS_FILE."
     warn "Adding alongside existing hooks."
@@ -191,14 +197,35 @@ if jq -e '.hooks.Stop' "$SETTINGS_FILE" &>/dev/null; then
     jq --arg cmd "bash $HOOK_FILE" \
       '.hooks.Stop += [{"hooks": [{"type": "command", "command": $cmd, "async": true}]}]' \
       "$SETTINGS_FILE" > "$TMP" && mv "$TMP" "$SETTINGS_FILE"
-    success "Hook appended to existing Stop hooks"
+    success "Stop hook appended to existing Stop hooks"
   fi
 else
   TMP=$(mktemp)
   jq --arg cmd "bash $HOOK_FILE" \
     '. + {"hooks": (.hooks // {} | . + {"Stop": [{"hooks": [{"type": "command", "command": $cmd, "async": true}]}]})}' \
     "$SETTINGS_FILE" > "$TMP" && mv "$TMP" "$SETTINGS_FILE"
-  success "Hook registered in $SETTINGS_FILE"
+  success "Stop hook registered in $SETTINGS_FILE"
+fi
+
+# Check if a Notification hook already exists
+if jq -e '.hooks.Notification' "$SETTINGS_FILE" &>/dev/null; then
+  if jq -e --arg cmd "bash $HOOK_FILE" '.hooks.Notification[]?.hooks[]? | select(.command == $cmd)' "$SETTINGS_FILE" &>/dev/null; then
+    success "Notification hook already registered in $SETTINGS_FILE — skipping"
+  else
+    warn "A Notification hook already exists in $SETTINGS_FILE."
+    warn "Adding alongside existing hooks."
+    TMP=$(mktemp)
+    jq --arg cmd "bash $HOOK_FILE" \
+      '.hooks.Notification += [{"hooks": [{"type": "command", "command": $cmd, "async": true}]}]' \
+      "$SETTINGS_FILE" > "$TMP" && mv "$TMP" "$SETTINGS_FILE"
+    success "Notification hook appended to existing Notification hooks"
+  fi
+else
+  TMP=$(mktemp)
+  jq --arg cmd "bash $HOOK_FILE" \
+    '.hooks //= {} | .hooks.Notification = [{"hooks": [{"type": "command", "command": $cmd, "async": true}]}]' \
+    "$SETTINGS_FILE" > "$TMP" && mv "$TMP" "$SETTINGS_FILE"
+  success "Notification hook registered in $SETTINGS_FILE"
 fi
 
 # ── 4. Interactive configuration ──────────────────────────────────────────────
@@ -321,22 +348,24 @@ _ask_yn "$Q_AWAY" "n"
 CFG_AWAY="$REPLY"
 success "$([[ "$CFG_LANG" == "zh" ]] && echo '焦点感知' || echo 'Focus-aware') → $CFG_AWAY"
 
+success "$([[ "$CFG_LANG" == "zh" ]] && echo '焦点感知' || echo 'Focus-aware') → $CFG_AWAY"
+
 # Write env config to settings.json
 printf "\n"
 TMP=$(mktemp)
 jq \
-  --arg lang     "$CFG_LANG" \
-  --arg summary  "$CFG_SUMMARY" \
-  --arg duration "$CFG_DURATION" \
-  --arg project  "$CFG_PROJECT" \
-  --arg away     "$CFG_AWAY" \
+  --arg lang        "$CFG_LANG" \
+  --arg summary     "$CFG_SUMMARY" \
+  --arg duration    "$CFG_DURATION" \
+  --arg project     "$CFG_PROJECT" \
+  --arg away        "$CFG_AWAY" \
   '
   .env //= {} |
-  if $lang != "" then .env.NOTIFY_DONE_LANG = $lang else del(.env.NOTIFY_DONE_LANG) end |
-  .env.NOTIFY_DONE_SHOW_SUMMARY   = $summary  |
-  .env.NOTIFY_DONE_SHOW_DURATION  = $duration |
-  .env.NOTIFY_DONE_SHOW_PROJECT   = $project  |
-  .env.NOTIFY_DONE_ONLY_WHEN_AWAY = $away
+  if $lang != "" then .env.NOTIFY_LANG = $lang else del(.env.NOTIFY_LANG) end |
+  .env.NOTIFY_SHOW_SUMMARY   = $summary  |
+  .env.NOTIFY_SHOW_DURATION  = $duration |
+  .env.NOTIFY_SHOW_PROJECT   = $project  |
+  .env.NOTIFY_ONLY_WHEN_AWAY = $away
   ' "$SETTINGS_FILE" > "$TMP" && mv "$TMP" "$SETTINGS_FILE"
 success "Configuration saved → $SETTINGS_FILE"
 
@@ -346,6 +375,21 @@ jq empty "$SETTINGS_FILE" && success "settings.json is valid JSON"
 # ── 5. Smoke-test ─────────────────────────────────────────────────────────────
 printf '\n%s' "Testing notification… "
 echo '{"session_id":""}' | bash "$HOOK_FILE" && printf "${GREEN}OK${NC}\n" || printf "${RED}FAILED${NC}\n"
+
+# ── 6. Bonus Features ─────────────────────────────────────────────────────────
+if [[ "$CFG_LANG" == "zh" ]]; then
+  printf "\n${CLAUDE}  ✨ 你知道吗？还有更多“隐藏”功能！${NC}"
+  printf "\n  ${CLAUDE}• ${NC}飞书通知：配置 NOTIFY_FEISHU_WEBHOOK_URL 即可开启。"
+  printf "\n  ${CLAUDE}• ${NC}LLM 摘要：配置 NOTIFY_LLM_API_KEY，让 AI 总结回复内容。"
+  printf "\n  ${CLAUDE}• ${NC}自定义音效：配置 NOTIFY_SOUND_FILE 播放你喜欢的提示音。"
+  printf "\n  详情请见 README 中的“环境变量”部分。\n"
+else
+  printf "\n${CLAUDE}  ✨ Pro Tip: You have more features!${NC}"
+  printf "\n  ${CLAUDE}• ${NC}Feishu (Lark): Set NOTIFY_FEISHU_WEBHOOK_URL to enable."
+  printf "\n  ${CLAUDE}• ${NC}LLM Summary: Set NOTIFY_LLM_API_KEY to distill responses."
+  printf "\n  ${CLAUDE}• ${NC}Custom Sound: Set NOTIFY_SOUND_FILE for custom audio cues."
+  printf "\n  Check README's \"Environmental Variables\" section for details.\n"
+fi
 
 printf "\n${GREEN}Installation complete!${NC}\n"
 printf "Restart Claude Code (or open /hooks) to activate the hook.\n\n"

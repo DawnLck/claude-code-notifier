@@ -15,9 +15,9 @@ Welcome to the claude-code-notify sound library! 欢迎来到 claude-code-notify
 
 ## 🛠️ How to use / 如何使用
 
-Open `~/.claude/settings.json` and add the `NOTIFY_DONE_SOUND_FILE` environment variable with the absolute path to your chosen sound.
+Open `~/.claude/settings.json` and add the `NOTIFY_SOUND_FILE` environment variable with the absolute path to your chosen sound.
 
-打开 `~/.claude/settings.json`，在 `env` 字段中添加 `NOTIFY_DONE_SOUND_FILE` 变量，并设置为你所选音效的绝对路径。
+打开 `~/.claude/settings.json`，在 `env` 字段中添加 `NOTIFY_SOUND_FILE` 变量，并设置为你所选音效的绝对路径。
 
 ## 🎨 Contribute / 贡献音效
 
