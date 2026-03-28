@@ -156,7 +156,9 @@ All options are set as environment variables in `~/.claude/settings.json`:
 | `NOTIFY_SHOW_DURATION` | `"true"` | Show task duration in the subtitle. |
 | `NOTIFY_SHOW_PROJECT` | `"true"` | Show project name in the subtitle. |
 | `NOTIFY_ONLY_WHEN_AWAY` | `"false"` | Suppress the notification when the originating terminal is already the frontmost app. |
-| `NOTIFY_SOUND_FILE` | | Absolute path to a .mp3/.wav for custom notification sound. See [Sound Library](sounds/README.md). |
+| `NOTIFY_SOUND_FILE` | | Absolute path to a .mp3/.wav for default notification sound. See [Sound Library](sounds/README.md). |
+| `NOTIFY_SOUND_NOTIFICATION` | | Optional. Sound specifically for "input required" / permission notifications. |
+| `NOTIFY_SOUND_END` | | Optional. Sound specifically for task completion notifications. |
 | `NOTIFY_FEISHU_WEBHOOK_URL` | | Feishu/Lark Webhook URL (recommended). |
 | `NOTIFY_FEISHU_WEBHOOK_SECRET` | | Optional signature secret for the Webhook. |
 | `NOTIFY_LLM_ENDPOINT` | | API endpoint for LLM summarization (see below). |
@@ -384,7 +386,9 @@ Claude 完成任务
 | `NOTIFY_SHOW_DURATION` | `"true"` | 是否在副标题中显示任务耗时。 |
 | `NOTIFY_SHOW_PROJECT` | `"true"` | 是否在副标题中显示项目名称。 |
 | `NOTIFY_ONLY_WHEN_AWAY` | `"false"` | 设置为 `"true"` 时，如果所在的终端窗口已处于最前，则不发送通知。 |
-| `NOTIFY_SOUND_FILE` | | 自定义通知音效文件（.mp3/.wav 的绝对路径）。详见 [音效库](sounds/README.md)。 |
+| `NOTIFY_SOUND_FILE` | | 自定义默认通知音效文件（.mp3/.wav 的绝对路径）。详见 [音效库](sounds/README.md)。 |
+| `NOTIFY_SOUND_NOTIFICATION` | | 可选。专门用于“需要输入”或授权提醒时的通知音效。 |
+| `NOTIFY_SOUND_END` | | 可选。专门用于“任务完成”时的通知音效。 |
 | `NOTIFY_FEISHU_WEBHOOK_URL` | | 飞书/Lark 机器人 Webhook 地址（推荐）。 |
 | `NOTIFY_FEISHU_WEBHOOK_SECRET` | | 飞书机器人 Webhook 的可选签名校验密钥。 |
 | `NOTIFY_LLM_ENDPOINT` | | LLM 摘要 API 地址（详见下文）。 |

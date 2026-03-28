@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# claude-code-notify.sh — Claude Code "Stop" hook
+# claude-code-notify.sh — Claude Code hook
 #
-# Sends a native desktop notification when Claude finishes a task.
+# Sends a native desktop notification when Claude need notify or finishes a task.
 # • Shows first sentence of Claude's last reply as the task summary.
 # • Shows session duration and project name in the subtitle.
 # • On macOS: clicking the notification activates the originating terminal.
@@ -123,17 +123,51 @@ _send_feishu_webhook() {
 # Prints the sentence to stdout; returns non-zero on failure (caller falls back).
 _summarize_with_llm() {
   local text="$1"
+  local svc="${NOTIFY_LLM_SERVICE:-}"
   local endpoint="${NOTIFY_LLM_ENDPOINT:-}"
   local api_key="${NOTIFY_LLM_API_KEY:-}"
-  local model="${NOTIFY_LLM_MODEL:-claude-haiku-4-5-20251001}"
+  local model="${NOTIFY_LLM_MODEL:-}"
   local fmt="${NOTIFY_LLM_API_FORMAT:-anthropic}"
   local max_tokens="${NOTIFY_LLM_MAX_TOKENS:-1024}"
   local extra_body="${NOTIFY_LLM_EXTRA_BODY:-{}}"
 
+  # If service is not set, but we have an API key, infer the service for backwards compatibility
+  if [[ -z "$svc" ]]; then
+    if [[ -n "$api_key" ]]; then
+      [[ "$fmt" == "openai" ]] && svc="custom-openai" || svc="custom-anthropic"
+    else
+      return 1
+    fi
+  fi
+  [[ "$svc" == "none" ]] && return 1
+
+  # Handle "Claude Code" default service
+  if [[ "$svc" == "claude-code" ]]; then
+    local creds="$HOME/.claude/.credentials.json"
+    if [[ -f "$creds" ]] && command -v jq &>/dev/null; then
+      api_key=$(jq -r '.claudeAiOauth.accessToken // empty' "$creds" 2>/dev/null || true)
+      endpoint="https://api.anthropic.com/v1/messages"
+      fmt="anthropic"
+      [[ -z "$model" ]] && model="claude-3-5-haiku-20241022"
+    fi
+  fi
+
+  # Pick defaults for other services
+  if [[ "$svc" == "custom-anthropic" ]]; then
+    [[ -z "$endpoint" ]] && endpoint="https://api.anthropic.com/v1/messages"
+    [[ -z "$model" ]]    && model="claude-3-5-haiku-latest"
+    fmt="anthropic"
+  elif [[ "$svc" == "custom-openai" ]]; then
+    fmt="openai"
+  fi
+
+  [[ -z "$endpoint" || -z "$api_key" || -z "$text" || -z "$model" ]] && return 1
+  command -v curl &>/dev/null || return 1
+
   # For debugging — only active if NOTIFY_DEBUG is true
   local _log="/tmp/claude-notify-llm.log"
 
-  # Language-aware prompt: detect zh from env var or system locale
+  # Language-aware prompt
   local _lang="${NOTIFY_LANG:-}"
   [[ -z "$_lang" ]] && [[ "${LANG:-}${LC_ALL:-}" == *zh* ]] && _lang="zh"
   local prompt
@@ -142,9 +176,6 @@ _summarize_with_llm() {
   else
     prompt="Summarize the following AI assistant response in one concise sentence (max 150 characters). Output only the sentence, no quotes or extra explanation:"
   fi
-
-  [[ -z "$endpoint" || -z "$api_key" || -z "$text" ]] && return 1
-  command -v curl &>/dev/null || return 1
 
   local payload response result
 
@@ -155,7 +186,7 @@ _summarize_with_llm() {
       --arg user   "$text" \
       --arg max    "$max_tokens" \
       --argjson extra "$extra_body" \
-      '{model: $model, max_tokens: ($max | tonumber), thinking: {"type": "disabled"}, messages: [{role: "system", content: $sys}, {role: "user", content: $user}]} * $extra')
+      '{model: $model, max_tokens: ($max | tonumber), messages: [{role: "system", content: $sys}, {role: "user", content: $user}]} * $extra')
 
     response=$(curl -sf --max-time 15 \
       -X POST "$endpoint" \
@@ -244,7 +275,14 @@ if [[ "$HOOK_EVENT" != "Notification" && -n "$SESSION_ID" ]]; then
     DETAILS=""
     if [[ -n "$_raw" ]]; then
       # Extract details: LLM summarization (if configured) or raw text fallback
-      if [[ -n "${NOTIFY_LLM_ENDPOINT:-}" && -n "${NOTIFY_LLM_API_KEY:-}" ]]; then
+      _svc="${NOTIFY_LLM_SERVICE:-}"
+      _llm_ready=false
+      if [[ -n "$_svc" && "$_svc" != "none" ]]; then
+        _llm_ready=true
+      elif [[ -n "${NOTIFY_LLM_ENDPOINT:-}" && -n "${NOTIFY_LLM_API_KEY:-}" ]]; then
+        _llm_ready=true
+      fi
+      if [[ "$_llm_ready" == "true" ]]; then
         _llm_result=$(_summarize_with_llm "$_raw" || true)
         if [[ -n "$_llm_result" ]]; then
           # LLM succeeded: use its output as the sole summary, drop verbose DETAILS
@@ -270,7 +308,7 @@ if [[ "$HOOK_EVENT" != "Notification" && -n "$SESSION_ID" ]]; then
           | head -c 800)
         unset _remaint
       fi
-      unset _llm_result
+      unset _svc _llm_ready _llm_result
     fi
     unset _raw
   fi
@@ -486,7 +524,11 @@ for _p in "${_sub_parts[@]}"; do
 done
 unset _lang _sub_parts _p
 
-_sound_file="${NOTIFY_SOUND_FILE:-}"
+if [[ "$HOOK_EVENT" == "Notification" ]]; then
+  _sound_file="${NOTIFY_SOUND_NOTIFICATION:-${NOTIFY_SOUND_FILE:-}}"
+else
+  _sound_file="${NOTIFY_SOUND_END:-${NOTIFY_SOUND_FILE:-}}"
+fi
 _play_sound "$_sound_file"
 
 # ─── 8. Send notification (platform-dispatched) ──────────────────────────────

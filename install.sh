@@ -11,6 +11,9 @@ HOOK_DIR="$HOME/.claude/hooks"
 HOOK_FILE="$HOOK_DIR/claude-code-notify.sh"
 SETTINGS_FILE="$HOME/.claude/settings.json"
 REPO_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/claude-code-notify.sh"
+REPO_CONFIG_SERVER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/config_server.py"
+CONFIG_SERVER_FILE="$HOME/.claude/config_server.py"
+CLAUDE_DIR="$HOME/.claude"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CLAUDE='\033[38;2;217;119;88m'; NC='\033[0m'
 
@@ -173,11 +176,28 @@ case "$OS" in
     ;;
 esac
 
-# ── 2. Copy hook script ──────────────────────────────────────────────────────
+# ── 2. Copy files ─────────────────────────────────────────────────────────────
+info "Copying hook files to $CLAUDE_DIR..."
 mkdir -p "$HOOK_DIR"
 cp "$REPO_SCRIPT" "$HOOK_FILE"
 chmod +x "$HOOK_FILE"
-success "Hook script installed → $HOOK_FILE"
+
+# Copy the config server if it exists
+if [[ -f "$REPO_CONFIG_SERVER" ]]; then
+  cp "$REPO_CONFIG_SERVER" "$CONFIG_SERVER_FILE"
+  chmod +x "$CONFIG_SERVER_FILE"
+fi
+
+# Copy sounds directory if it exists
+SOUNDS_SOURCE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/sounds"
+SOUNDS_DEST="$CLAUDE_DIR/sounds"
+if [[ -d "$SOUNDS_SOURCE" ]]; then
+  info "Copying preset sounds to $SOUNDS_DEST..."
+  mkdir -p "$SOUNDS_DEST"
+  cp -r "$SOUNDS_SOURCE"/* "$SOUNDS_DEST/"
+fi
+
+success "Files copied to $CLAUDE_DIR"
 
 # ── 3. Register hook in Claude Code settings ─────────────────────────────────
 if [[ ! -f "$SETTINGS_FILE" ]]; then
@@ -359,13 +379,17 @@ jq \
   --arg duration    "$CFG_DURATION" \
   --arg project     "$CFG_PROJECT" \
   --arg away        "$CFG_AWAY" \
+  --arg s_notify    "$CLAUDE_DIR/sounds/minimal_chime.wav" \
+  --arg s_stop      "$CLAUDE_DIR/sounds/mario_coin.wav" \
   '
   .env //= {} |
   if $lang != "" then .env.NOTIFY_LANG = $lang else del(.env.NOTIFY_LANG) end |
   .env.NOTIFY_SHOW_SUMMARY   = $summary  |
   .env.NOTIFY_SHOW_DURATION  = $duration |
   .env.NOTIFY_SHOW_PROJECT   = $project  |
-  .env.NOTIFY_ONLY_WHEN_AWAY = $away
+  .env.NOTIFY_ONLY_WHEN_AWAY = $away     |
+  .env.NOTIFY_SOUND_NOTIFICATION = (.env.NOTIFY_SOUND_NOTIFICATION // $s_notify) |
+  .env.NOTIFY_SOUND_END = (.env.NOTIFY_SOUND_END // $s_stop)
   ' "$SETTINGS_FILE" > "$TMP" && mv "$TMP" "$SETTINGS_FILE"
 success "Configuration saved → $SETTINGS_FILE"
 
@@ -376,19 +400,71 @@ jq empty "$SETTINGS_FILE" && success "settings.json is valid JSON"
 printf '\n%s' "Testing notification… "
 echo '{"session_id":""}' | bash "$HOOK_FILE" && printf "${GREEN}OK${NC}\n" || printf "${RED}FAILED${NC}\n"
 
-# ── 6. Bonus Features ─────────────────────────────────────────────────────────
-if [[ "$CFG_LANG" == "zh" ]]; then
-  printf "\n${CLAUDE}  ✨ 你知道吗？还有更多“隐藏”功能！${NC}"
-  printf "\n  ${CLAUDE}• ${NC}飞书通知：配置 NOTIFY_FEISHU_WEBHOOK_URL 即可开启。"
-  printf "\n  ${CLAUDE}• ${NC}LLM 摘要：配置 NOTIFY_LLM_API_KEY，让 AI 总结回复内容。"
-  printf "\n  ${CLAUDE}• ${NC}自定义音效：配置 NOTIFY_SOUND_FILE 播放你喜欢的提示音。"
-  printf "\n  详情请见 README 中的“环境变量”部分。\n"
+# ── 6. Web Configuration Console ──────────────────────────────────────────────
+if [[ -f "$CONFIG_SERVER_FILE" ]] && command -v python3 &>/dev/null; then
+  printf "\n"
+  if [[ "$CFG_LANG" == "zh" ]]; then
+    Q_WEB="是否打开 Web 控制台来进行更多配置？（飞书 Webhook、LLM 摘要、自定义音效等）"
+  else
+    Q_WEB="Open the Web Configuration Console for advanced settings? (Feishu, LLM summary, custom sounds, etc.)"
+  fi
+  _ask_yn "$Q_WEB" "y"
+  if [[ "$REPLY" == "true" ]]; then
+    CONFIG_PORT=8888
+    # Find an available port if 8888 is in use
+    while lsof -i :"$CONFIG_PORT" &>/dev/null 2>&1; do
+      CONFIG_PORT=$((CONFIG_PORT + 1))
+    done
+
+    # Start the config server in the background
+    NOTIFY_CONFIG_PORT="$CONFIG_PORT" python3 "$CONFIG_SERVER_FILE" &
+    CONFIG_PID=$!
+    sleep 0.5
+
+    # Open the browser
+    case "$OS" in
+      Darwin)       open "http://localhost:$CONFIG_PORT" ;;
+      Linux)
+        if [[ "$IS_WSL" == true ]]; then
+          cmd.exe /c start "http://localhost:$CONFIG_PORT" 2>/dev/null || \
+            powershell.exe -c "Start-Process 'http://localhost:$CONFIG_PORT'" 2>/dev/null
+        else
+          xdg-open "http://localhost:$CONFIG_PORT" 2>/dev/null || \
+            sensible-browser "http://localhost:$CONFIG_PORT" 2>/dev/null
+        fi
+        ;;
+      MINGW*|MSYS*|CYGWIN*)
+        start "http://localhost:$CONFIG_PORT" 2>/dev/null
+        ;;
+    esac
+
+    if [[ "$CFG_LANG" == "zh" ]]; then
+      info "Web 控制台已在浏览器中打开 (http://localhost:$CONFIG_PORT)"
+      info "点击 'Save & Close' 后服务将自动关闭。"
+    else
+      info "Web Console opened at http://localhost:$CONFIG_PORT"
+      info "Server will shut down automatically when you click 'Save & Close'."
+    fi
+
+    # Wait for the server to exit
+    wait "$CONFIG_PID" 2>/dev/null
+    success "$([[ "$CFG_LANG" == "zh" ]] && echo 'Web 控制台已关闭' || echo 'Web Console closed')"
+  fi
 else
-  printf "\n${CLAUDE}  ✨ Pro Tip: You have more features!${NC}"
-  printf "\n  ${CLAUDE}• ${NC}Feishu (Lark): Set NOTIFY_FEISHU_WEBHOOK_URL to enable."
-  printf "\n  ${CLAUDE}• ${NC}LLM Summary: Set NOTIFY_LLM_API_KEY to distill responses."
-  printf "\n  ${CLAUDE}• ${NC}Custom Sound: Set NOTIFY_SOUND_FILE for custom audio cues."
-  printf "\n  Check README's \"Environmental Variables\" section for details.\n"
+  # Fallback: show tips if python3 is not available
+  if [[ "$CFG_LANG" == "zh" ]]; then
+    printf "\n${CLAUDE}  ✨ 你知道吗？还有更多"隐藏"功能！${NC}"
+    printf "\n  ${CLAUDE}• ${NC}飞书通知：配置 NOTIFY_FEISHU_WEBHOOK_URL 即可开启。"
+    printf "\n  ${CLAUDE}• ${NC}LLM 摘要：配置 NOTIFY_LLM_API_KEY，让 AI 总结回复内容。"
+    printf "\n  ${CLAUDE}• ${NC}自定义音效：配置 NOTIFY_SOUND_FILE 播放你喜欢的提示音。"
+    printf "\n  详情请见 README 中的"环境变量"部分。\n"
+  else
+    printf "\n${CLAUDE}  ✨ Pro Tip: You have more features!${NC}"
+    printf "\n  ${CLAUDE}• ${NC}Feishu (Lark): Set NOTIFY_FEISHU_WEBHOOK_URL to enable."
+    printf "\n  ${CLAUDE}• ${NC}LLM Summary: Set NOTIFY_LLM_API_KEY to distill responses."
+    printf "\n  ${CLAUDE}• ${NC}Custom Sound: Set NOTIFY_SOUND_FILE for custom audio cues."
+    printf "\n  Check README's \"Environmental Variables\" section for details.\n"
+  fi
 fi
 
 printf "\n${GREEN}Installation complete!${NC}\n"
